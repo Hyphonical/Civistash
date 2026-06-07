@@ -9,7 +9,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use chrono::{NaiveDate, Utc};
+use chrono::{Days, NaiveDate, Utc};
 use serde_json::json;
 
 use crate::api::Image;
@@ -163,6 +163,60 @@ pub fn cleanup_partials(partition: &Path) {
 		let path = entry.path();
 		if path.extension().and_then(|s| s.to_str()) == Some("partial") {
 			let _ = fs::remove_file(&path);
+		}
+	}
+}
+
+/// Delete the tarball file at `path`. Idempotent — does nothing if the
+/// file is absent. Errors are silently ignored (logged as a warning).
+pub fn delete_tarball(path: &Path) {
+	match fs::remove_file(path) {
+		Ok(()) => tracing::info!(path = %path.display(), "deleted tarball"),
+		Err(e) if e.kind() == ErrorKind::NotFound => {}
+		Err(e) => tracing::warn!(path = %path.display(), error = %e, "failed to delete tarball"),
+	}
+}
+
+/// Delete date partitions **older than** `keep_days` days from `base`.
+///
+/// CivitAI's `period=Day` is a rolling 24h window, not a calendar-day
+/// reset, so today's top 100 can overlap with yesterday's. Keeping
+/// today + yesterday (`keep_days=2`) means the dedup scan still finds
+/// overlapping entries if the daemon restarts mid-cycle.
+///
+/// Example with `keep_days=2` on June 9:
+///
+/// - Keeps `2026-06-08/` and `2026-06-09/`
+/// - Deletes `2026-06-07/` and older
+pub fn delete_old_partitions(base: &Path, today: NaiveDate, keep_days: u32) {
+	let cutoff = match today.checked_sub_days(Days::new(keep_days as u64)) {
+		Some(d) => d,
+		None => return, // today earlier than keep_days → nothing to delete
+	};
+
+	let Ok(entries) = fs::read_dir(base) else {
+		return;
+	};
+	for entry in entries.flatten() {
+		let path = entry.path();
+		if !path.is_dir() {
+			continue;
+		}
+		let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+			continue;
+		};
+		// Only match "YYYY-MM-DD" directories (our date partitions).
+		if name.len() != 10 || !name.starts_with("20") {
+			continue;
+		}
+		let Ok(dir_date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") else {
+			continue;
+		};
+		if dir_date <= cutoff {
+			tracing::info!(path = %path.display(), "deleting old partition");
+			if let Err(e) = fs::remove_dir_all(&path) {
+				tracing::warn!(path = %path.display(), error = %e, "failed to delete partition");
+			}
 		}
 	}
 }

@@ -3,8 +3,21 @@ FROM rust:1.88-slim AS builder
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y \
+# aws-lc-sys (pulled in by reqwest → rustls → aws-lc-rs)
+# compiles AWS-LC from source and needs cmake + a C toolchain.
+# `pkg-config` is used by flate2 to detect zlib at build time;
+# if it's absent, flate2 falls back to the bundled `miniz_oxide`
+# crate (pure Rust, no C dependency), so it's harmless but
+# included for a zero-warning build log. `ca-certificates` keeps
+# `cargo build` from failing on HTTPS crate downloads in slim
+# images that ship without certs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    gcc \
+    g++ \
+    make \
     pkg-config \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Pre-fetch dependencies for better layer caching

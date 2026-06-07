@@ -127,11 +127,7 @@ pub async fn run_cycle(
 					}
 					Err(e) => {
 						stats.failed += 1;
-						ui::status(
-							SYM_FAIL,
-							BRICK,
-							format!("Sidecar     {name:<14}  ({e})"),
-						);
+						ui::status(SYM_FAIL, BRICK, format!("Sidecar     {name:<14}  ({e})"));
 					}
 				}
 			}
@@ -158,6 +154,7 @@ pub async fn run_cycle(
 
 	// Bundle and upload run only on the happy path; an earlier `?`
 	// skips both.
+	let mut upload_succeeded = false;
 	if cli.bundle {
 		match crate::bundle::create_tarball(base, date) {
 			Ok(tarball) => ui::status(
@@ -174,9 +171,37 @@ pub async fn run_cycle(
 	if let Some(repo) = &cli.upload_hf {
 		let tarball = base.join(format!("{}.tar.gz", date.format("%Y-%m-%d")));
 		match crate::upload::upload_to_hf(&tarball, repo, cli.hf_token.as_deref()).await {
-			Ok(()) => ui::status(SYM_OK, FOREST, format!("Uploaded    → hf:{repo}")),
+			Ok(()) => {
+				upload_succeeded = true;
+				ui::status(SYM_OK, FOREST, format!("Uploaded    → hf:{repo}"));
+			}
 			Err(e) => ui::status(SYM_FAIL, BRICK, format!("Upload failed: {e}")),
 		}
+	}
+
+	// --delete-after: clean up after a successful round-trip.
+	//
+	// 1. The tarball is deleted immediately — Hugging Face has the
+	//    same bytes, so the local copy is pure waste.
+	// 2. Date partitions are kept for 2 days (today + yesterday) to
+	//    cover the rolling 24h window that CivitAI uses for
+	//    `period=Day`. If the daemon restarts mid-cycle, yesterday's
+	//    files are still there for dedup, preventing duplicate
+	//    uploads. Partitions 3+ days old are removed.
+	//
+	// A failed upload preserves everything so the next cycle can retry.
+	if cli.delete_after && upload_succeeded {
+		let tarball = base.join(format!("{}.tar.gz", date.format("%Y-%m-%d")));
+		storage::delete_tarball(&tarball);
+		storage::delete_old_partitions(base, date, 2);
+		ui::status(
+			SYM_OK,
+			DIM,
+			format!(
+				"Cleaned     → {} (local files removed)",
+				date.format("%Y-%m-%d").to_string().style(EMBER)
+			),
+		);
 	}
 
 	Ok(stats)

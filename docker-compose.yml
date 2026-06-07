@@ -4,6 +4,11 @@
 # out — uncomment it once you've created the destination dataset
 # and supplied the token.
 #
+# Optionally uncomment `--delete-after` to remove local files after
+# a successful HF upload — useful for VPS instances with limited
+# disk space (the data lives on Hugging Face, so local storage is
+# throwaway).
+#
 # Required env vars (set in a `.env` file next to this compose,
 # or in your shell):
 #
@@ -35,6 +40,9 @@ services:
     #
     # To enable HF upload, uncomment the `--upload-hf <repo>` part
     # and replace the repo id with your own (e.g. "my-org/nsfw-daily").
+    # If your VPS has limited disk space, also uncomment
+    # `--delete-after` — local files are removed after a successful
+    # upload so only Hugging Face keeps the data.
     command: >
       --daemon
       --period Day
@@ -43,3 +51,4 @@ services:
       --bundle
       --limit 200
       # --upload-hf hyphonical/civistash-daily
+      # --delete-after

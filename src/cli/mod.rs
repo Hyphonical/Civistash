@@ -74,6 +74,13 @@ pub struct Cli {
 	#[arg(long, value_name = "REPO")]
 	pub upload_hf: Option<String>,
 
+	/// Delete local files (images, sidecars, and tarball) after a
+	/// successful Hugging Face upload. Has no effect without
+	/// `--bundle --upload-hf`. When the upload fails, files are
+	/// preserved so the next cycle can retry.
+	#[arg(long, default_value_t = false)]
+	pub delete_after: bool,
+
 	/// Log verbosity for `civistash::*` (third-party crates
 	/// always default to `warn`; override via `RUST_LOG`).
 	#[arg(long, default_value = "info")]
