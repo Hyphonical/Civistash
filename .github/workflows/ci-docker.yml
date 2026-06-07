@@ -1,0 +1,74 @@
+name: Docker Image
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+# ghcr.io is GitHub's own container registry. The image is owned
+# by whoever owns the repository, so we read it from
+# `github.repository` and lowercase it to match ghcr.io's naming
+# convention. Works for forks too — no hardcoded owner.
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ lower(github.repository) }}
+
+jobs:
+  build:
+    name: 🐳 Docker Image
+    runs-on: ubuntu-latest
+    # `packages: write` is required to push to ghcr.io. PR builds
+    # skip the push step entirely (see `if:` on the build step)
+    # but the permission is harmless to declare up front.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login to ghcr.io
+        # PRs cannot publish to package registries, so skip auth
+        # on PRs. The build still runs and verifies the Dockerfile.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Tag scheme:
+          #   - main commit        → latest, edge, main
+          #   - PR #N              → pr-N
+          #   - tag v1.2.3         → 1.2.3, 1.2, 1
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=edge,enable={{is_default_branch}}
+
+      - name: 🐳 Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # Build on every event, but only push from non-PR runs.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GitHub Actions cache backend for buildx — fast
+          # incremental builds after the first run.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
