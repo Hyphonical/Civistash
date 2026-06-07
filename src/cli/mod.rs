@@ -23,9 +23,15 @@ pub struct Cli {
 	#[arg(long, default_value_t = false)]
 	pub daemon: bool,
 
-	/// CivitAI API token (also via CIVITAI_TOKEN env).
-	#[arg(short, long, env = "CIVITAI_TOKEN")]
-	pub token: Option<String>,
+	/// CivitAI API token (also via `CIVITAI_TOKEN` env).
+	#[arg(long, env = "CIVITAI_TOKEN")]
+	pub ca_token: Option<String>,
+
+	/// Hugging Face token (also via `HUGGINGFACE_TOKEN` env).
+	/// Required for `--upload-hf` to work; the same flag/env is
+	/// the only way to authenticate against the Hub.
+	#[arg(long, env = "HUGGINGFACE_TOKEN")]
+	pub hf_token: Option<String>,
 
 	/// Output directory. Date-partitioned subdirectories are created
 	/// inside.
@@ -53,13 +59,26 @@ pub struct Cli {
 	#[arg(long, value_enum, value_delimiter = ',')]
 	pub nsfw_level: Vec<NsfwLevel>,
 
-	/// Download video media too. By default only `type=image` is
-	/// kept; with this flag, `type=video` entries are downloaded
-	/// as well. Audio and other non-image types are still filtered.
+	/// Download all media types (images, videos, audio, anything
+	/// the API returns). By default only `type=image` is kept.
 	#[arg(long, default_value_t = false)]
-	pub video: bool,
+	pub all_types: bool,
 
-	/// Log verbosity (tracing env-filter directive).
+	/// Bundle the date partition into a `.tar.gz` after the cycle
+	/// finishes. Output: `<output-dir>/YYYY-MM-DD.tar.gz`. Pairs
+	/// naturally with `--upload-hf`.
+	#[arg(long, default_value_t = false)]
+	pub bundle: bool,
+
+	/// Upload the per-cycle bundle to a Hugging Face dataset repo
+	/// (e.g. `my-org/my-dataset`). Requires `--bundle` (or a
+	/// pre-existing bundle file). The `HUGGINGFACE_TOKEN` env var
+	/// or `--hf-token` flag supplies credentials.
+	#[arg(long, value_name = "REPO")]
+	pub upload_hf: Option<String>,
+
+	/// Log verbosity for `civistash::*` (third-party crates
+	/// always default to `warn`; override via `RUST_LOG`).
 	#[arg(long, default_value = "info")]
 	pub log_level: String,
 }

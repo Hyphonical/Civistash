@@ -1,0 +1,45 @@
+# Docker Compose recipe for a daily civistash daemon that bundles
+# each day's downloads into a `.tar.gz` ready for Hugging Face
+# dataset upload. The HF upload line is included but commented
+# out — uncomment it once you've created the destination dataset
+# and supplied the token.
+#
+# Required env vars (set in a `.env` file next to this compose,
+# or in your shell):
+#
+#   CIVITAI_TOKEN=eyJ...       # from civitai.com → Account Settings
+#   HUGGINGFACE_TOKEN=hf_...   # from huggingface.co → Settings → Tokens
+#
+# Mount the host path `./stash` to the container's `/stash` so
+# the bundle and sidecars persist across container restarts.
+
+services:
+  civistash:
+    build: .
+    image: ghcr.io/hyphonical/civistash:latest
+    container_name: civistash
+    restart: unless-stopped
+    environment:
+      # The `?:` form fails the compose up if CIVITAI_TOKEN is
+      # unset — better a loud error than a quiet 401.
+      CIVITAI_TOKEN: ${CIVITAI_TOKEN:?CIVITAI_TOKEN must be set in your .env}
+      # Optional: only required if you enable --upload-hf below.
+      HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN:-}
+      RUST_LOG: info
+    volumes:
+      - ./stash:/stash
+    # Daily daemon, all NSFW levels (none+soft+mature+x), all
+    # media types (image+video+audio), and bundle each cycle into
+    # a `.tar.gz` next to the date partition. Change `--period` to
+    # Week or Month for less-frequent runs.
+    #
+    # To enable HF upload, uncomment the `--upload-hf <repo>` part
+    # and replace the repo id with your own (e.g. "my-org/nsfw-daily").
+    command: >
+      --daemon
+      --period Day
+      --nsfw-level none,soft,mature,x
+      --all-types
+      --bundle
+      --limit 200
+      # --upload-hf hyphonical/civistash-daily

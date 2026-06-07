@@ -44,13 +44,13 @@ pub async fn run_cycle(
 		limit = cli.limit,
 		period = %cli.period,
 		sort = %cli.sort,
-		video = cli.video,
+		all_types = cli.all_types,
 		"fetching popular images"
 	);
 
 	let items = match api::fetch_popular(
 		client,
-		cli.token.as_deref(),
+		cli.ca_token.as_deref(),
 		cli.period,
 		cli.sort,
 		&cli.nsfw_level,
@@ -88,10 +88,9 @@ pub async fn run_cycle(
 			break;
 		}
 
-		// (a) Filter non-image media. Videos are kept only if the
-		// user opted in with --video; audio and other types are
-		// always filtered in v0.1.0.
-		if image.is_filtered(cli.video) {
+		// (a) Filter non-image media. Any non-image type is kept
+		// only if the user opted in with --all-types.
+		if image.is_filtered(cli.all_types) {
 			stats.filtered += 1;
 			let name = format!("{}.{}", image.id, extension_from_url(&image.url));
 			let ty = image.media_type.as_deref().unwrap_or("unknown");
@@ -176,6 +175,31 @@ pub async fn run_cycle(
 	}
 
 	stats.duration = start.elapsed();
+
+	// Post-cycle: bundle and (optionally) upload. Both run only on
+	// the happy path — if the cycle bailed with `?` earlier (API
+	// error), this never executes, which is what we want.
+	if cli.bundle {
+		match crate::bundle::create_tarball(base, date) {
+			Ok(tarball) => ui::status(
+				SYM_OK,
+				FOREST,
+				format!(
+					"Bundled     → {}",
+					tarball.display().to_string().style(EMBER)
+				),
+			),
+			Err(e) => ui::status(SYM_FAIL, BRICK, format!("Bundle failed: {e}")),
+		}
+	}
+	if let Some(repo) = &cli.upload_hf {
+		let tarball = base.join(format!("{}.tar.gz", date.format("%Y-%m-%d")));
+		match crate::upload::upload_to_hf(&tarball, repo, cli.hf_token.as_deref()).await {
+			Ok(()) => ui::status(SYM_OK, FOREST, format!("Uploaded    → hf:{repo}")),
+			Err(e) => ui::status(SYM_FAIL, BRICK, format!("Upload failed: {e}")),
+		}
+	}
+
 	Ok(stats)
 }
 

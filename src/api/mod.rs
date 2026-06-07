@@ -138,14 +138,14 @@ pub struct Image {
 
 impl Image {
 	/// True if this entry should be filtered out of the cycle. The
-	/// `allow_videos` flag toggles whether `media_type=video`
-	/// entries are kept. Audio and other unknown types are always
-	/// filtered for v0.1.0.
-	pub fn is_filtered(&self, allow_videos: bool) -> bool {
+	/// `allow_all` flag toggles whether any non-`image` media type
+	/// (videos, audio, unknown, …) is kept. With `allow_all = false`
+	/// (the default), only `media_type = "image"` (or absent) is
+	/// kept.
+	pub fn is_filtered(&self, allow_all: bool) -> bool {
 		match self.media_type.as_deref() {
 			Some("image") | None => false,
-			Some("video") => !allow_videos,
-			_ => true,
+			_ => !allow_all,
 		}
 	}
 }
@@ -181,7 +181,7 @@ const PER_PAGE_MAX: u32 = 200;
 /// fetch — we do not return partial results across pages.
 pub async fn fetch_popular(
 	client: &reqwest::Client,
-	token: Option<&str>,
+	ca_token: Option<&str>,
 	period: crate::cli::Period,
 	sort: crate::cli::SortOrder,
 	nsfw_level: &[NsfwLevel],
@@ -198,7 +198,7 @@ pub async fn fetch_popular(
 	loop {
 		let (page_items, next_cursor) = fetch_one_page(
 			client,
-			token,
+			ca_token,
 			period,
 			sort,
 			nsfw_level,
@@ -236,7 +236,7 @@ pub async fn fetch_popular(
 /// API-supplied cursor for the *next* page (if any).
 async fn fetch_one_page(
 	client: &reqwest::Client,
-	token: Option<&str>,
+	ca_token: Option<&str>,
 	period: crate::cli::Period,
 	sort: crate::cli::SortOrder,
 	nsfw_level: &[NsfwLevel],
@@ -275,7 +275,7 @@ async fn fetch_one_page(
 			.get(url.as_str())
 			.header(reqwest::header::USER_AGENT, USER_AGENT)
 			.header(reqwest::header::ACCEPT, "application/json");
-		if let Some(t) = token {
+		if let Some(t) = ca_token {
 			req = req.bearer_auth(t);
 		}
 

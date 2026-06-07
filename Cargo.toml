@@ -26,7 +26,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # ── Terminal Output ────────────────────────────────────────
 owo-colors   = { version = "4", features = ["supports-colors"] }
-indicatif    = "0.18"
 
 # ── HTTP Client ────────────────────────────────────────────
 # Note: PLAN.md §3 listed `rustls-tls` as the reqwest feature, but
@@ -47,6 +46,25 @@ chrono       = { version = "0.4", default-features = false, features = ["clock",
 # ── Error Handling ─────────────────────────────────────────
 anyhow       = "1"
 thiserror    = "2"
+
+# ── Bundling & Compression ──────────────────────────────────
+# Used by src/bundle/mod.rs to produce .tar.gz archives of the
+# date-partitioned output (for HF dataset upload workflows).
+tar         = "0.4"
+flate2      = "1"
+
+# ── Hugging Face Hub Client ────────────────────────────────
+# Pure-Rust async client for the HF Hub. Used for dataset
+# uploads via the builder pattern (`HFClient::builder()` →
+# `client.dataset(ns, name).upload_file()…send()`). The token
+# is passed explicitly through the builder when the user supplies
+# `--hf-token`; otherwise the crate's own `HF_TOKEN` resolution
+# runs (`HF_TOKEN` env, `~/.cache/huggingface/token`, …).
+#
+# Async is the default in 1.0+ — there's no longer a `tokio`
+# feature flag. We don't enable the `blocking` (sync) feature
+# since we run on a tokio runtime.
+hf-hub      = "1.0.0-rc.1"
 
 # ── Release Profile ────────────────────────────────────────
 [profile.release]

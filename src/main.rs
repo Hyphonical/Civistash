@@ -16,12 +16,14 @@ use owo_colors::OwoColorize;
 use tracing_subscriber::EnvFilter;
 
 mod api;
+mod bundle;
 mod cli;
 mod cycle;
 mod daemon;
 mod download;
 mod storage;
 mod ui;
+mod upload;
 
 use cli::Cli;
 
@@ -65,10 +67,15 @@ async fn run(cli: Cli) -> Result<()> {
 }
 
 /// Initialise `tracing` with an env filter. The CLI's `--log-level`
-/// flag is the default filter; `RUST_LOG` overrides it.
+/// flag sets the verbosity for `civistash::*` only; third-party
+/// crates (notably `hf-hub` and the `xet::*` CAS storage stack
+/// it pulls in) default to `warn` so an upload doesn't drown the
+/// console in `INFO` chatter. To get verbose third-party logs for
+/// debugging, set `RUST_LOG` directly, e.g.
+/// `RUST_LOG=civistash=debug,hf_hub=info,info=warn`.
 fn init_tracing(default_directive: &str) {
-	let filter =
-		EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive));
+	let filter = EnvFilter::try_from_default_env()
+		.unwrap_or_else(|_| EnvFilter::new(format!("civistash={default_directive},warn")));
 
 	tracing_subscriber::fmt()
 		.with_env_filter(filter)

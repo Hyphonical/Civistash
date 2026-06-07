@@ -30,6 +30,11 @@ WORKDIR /stash
 VOLUME ["/stash"]
 
 ENV CIVITAI_TOKEN=""
+# `HUGGINGFACE_TOKEN` is the user-facing env var. We forward it
+# to `HF_TOKEN` (the name the `hf` / `huggingface-cli` tools
+# expect) at container start so the user only has to set one.
+ENV HUGGINGFACE_TOKEN=""
+ENV HF_TOKEN=${HUGGINGFACE_TOKEN}
 ENV RUST_LOG=info
 
 ENTRYPOINT ["/usr/local/bin/civistash"]

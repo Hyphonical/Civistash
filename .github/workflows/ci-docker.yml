@@ -9,11 +9,11 @@ on:
 
 # ghcr.io is GitHub's own container registry. The image is owned
 # by whoever owns the repository, so we read it from
-# `github.repository` and lowercase it to match ghcr.io's naming
-# convention. Works for forks too — no hardcoded owner.
+# `github.repository` and lowercase it via a small bash step
+# (the `lower()` function isn't available in this runner's
+# expression context). Works for forks too — no hardcoded owner.
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ lower(github.repository) }}
 
 jobs:
   build:
@@ -28,6 +28,19 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
+
+      # Lowercase `github.repository` ("Hyphonical/Civistash" →
+      # "hyphonical/civistash") and stash it in $GITHUB_ENV so
+      # subsequent steps can read it as $IMAGE_NAME. We use a
+      # `tr` rather than the GH `lower()` function because the
+      # function isn't available in the runner's expression
+      # context in some configurations.
+      - name: 🔡 Derive image name
+        id: image-name
+        run: |
+          echo "IMAGE_NAME=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_ENV}"
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
       - name: 🐳 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
