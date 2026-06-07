@@ -35,7 +35,7 @@ RUN touch src/main.rs \
     && cargo build --release
 
 # ── Stage 2: Runtime ──────────────────────────────────────
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/cc-debian13:nonroot
 
 COPY --from=builder /build/target/release/civistash /usr/local/bin/civistash
 COPY LICENSE /LICENSE
