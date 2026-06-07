@@ -1,11 +1,6 @@
-//! Per-cycle orchestrator.
-//!
-//! This is the reusable unit called by both one-shot and daemon
-//! modes (PLAN.md §4 + §6.1). It is intentionally ignorant of the
-//! outer loop and signal handling — the daemon passes an optional
-//! `Arc<AtomicBool>` shutdown flag that the cycle checks between
-//! images, so a SIGTERM during a cycle lets the current image finish
-//! and its sidecar land on disk before returning.
+//! Per-cycle orchestrator. The daemon passes an optional shutdown
+//! flag that the cycle checks between images, so a signal received
+//! during a cycle lets the current image finish before returning.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,14 +19,11 @@ use crate::ui::{
 	SYM_SKIP, humanize_bytes,
 };
 
-/// Run one fetch cycle. Returns the per-cycle stats; the caller is
-/// responsible for printing the summary.
+/// Run one fetch cycle and return its per-image counters.
 ///
-/// `shutdown`, if supplied, is checked between images. When it flips
-/// to `true` the cycle finishes the current image, writes its
-/// sidecar, and returns. The in-flight HTTP request is not aborted —
-/// the plan's success criteria #5 requires the current image to
-/// finish before exit.
+/// When `shutdown` is `Some` and its flag is set, the cycle finishes
+/// the current image (writing its sidecar) and returns. The in-flight
+/// HTTP request is not aborted.
 pub async fn run_cycle(
 	client: &reqwest::Client,
 	cli: &Cli,
@@ -48,7 +40,7 @@ pub async fn run_cycle(
 		"fetching popular images"
 	);
 
-	let items = match api::fetch_popular(
+	let items = api::fetch_popular(
 		client,
 		cli.ca_token.as_deref(),
 		cli.period,
@@ -57,13 +49,7 @@ pub async fn run_cycle(
 		cli.limit,
 	)
 	.await
-	{
-		Ok(items) => items,
-		Err(e) => {
-			warn!(error = %e, "API fetch failed");
-			return Err(e.into());
-		}
-	};
+	.inspect_err(|e| warn!(error = %e, "API fetch failed"))?;
 
 	if items.is_empty() {
 		info!("API returned 0 images");
@@ -88,41 +74,36 @@ pub async fn run_cycle(
 			break;
 		}
 
-		// (a) Filter non-image media. Any non-image type is kept
-		// only if the user opted in with --all-types.
 		if image.is_filtered(cli.all_types) {
 			stats.filtered += 1;
-			let name = format!("{}.{}", image.id, extension_from_url(&image.url));
+			let name = display_name(image);
 			let ty = image.media_type.as_deref().unwrap_or("unknown");
 			ui::status(
 				SYM_FILTER,
 				DIM,
-				format!("Filtered    {:<14}  (type={})", name, ty),
+				format!("Filtered    {name:<14}  (type={ty})"),
 			);
 			continue;
 		}
 
-		// (b) Dedup by CivitAI image ID.
 		if storage::id_exists_anywhere(base, image.id) {
 			stats.skipped += 1;
-			let name = format!("{}.{}", image.id, extension_from_url(&image.url));
+			let name = display_name(image);
 			ui::status(
 				SYM_SKIP,
 				DIM,
-				format!("Skipped     {:<14}  (already present)", name),
+				format!("Skipped     {name:<14}  (already present)"),
 			);
 			continue;
 		}
 
-		// (c) Announce, then download.
-		let name = format!("{}.{}", image.id, extension_from_url(&image.url));
+		let name = display_name(image);
 		ui::status(
 			SYM_PROGRESS,
 			EMBER,
-			format!("Downloading {:<14}  {}", name, format_meta(image)),
+			format!("Downloading {name:<14}  {}", format_meta(image)),
 		);
 
-		// (d) Download + (e) sidecar.
 		match download::download_image(client, image, &partition).await {
 			DownloadOutcome::Ok(final_path) => {
 				match storage::write_sidecar(base, date, image, &final_path, &image.url) {
@@ -138,8 +119,7 @@ pub async fn run_cycle(
 							SYM_OK,
 							FOREST,
 							format!(
-								"Downloaded  {:<14}  → {} ({})",
-								name,
+								"Downloaded  {name:<14}  → {} ({})",
 								rel.style(EMBER),
 								humanize_bytes(size).bold()
 							),
@@ -150,7 +130,7 @@ pub async fn run_cycle(
 						ui::status(
 							SYM_FAIL,
 							BRICK,
-							format!("Sidecar     {:<14}  ({})", name, e),
+							format!("Sidecar     {name:<14}  ({e})"),
 						);
 					}
 				}
@@ -160,7 +140,7 @@ pub async fn run_cycle(
 				ui::status(
 					SYM_SKIP,
 					DIM,
-					format!("Skipped     {:<14}  (already present)", name),
+					format!("Skipped     {name:<14}  (already present)"),
 				);
 			}
 			DownloadOutcome::Failed(reason) => {
@@ -168,7 +148,7 @@ pub async fn run_cycle(
 				ui::status(
 					SYM_FAIL,
 					BRICK,
-					format!("Failed      {:<14}  ({})", name, reason),
+					format!("Failed      {name:<14}  ({reason})"),
 				);
 			}
 		}
@@ -176,9 +156,8 @@ pub async fn run_cycle(
 
 	stats.duration = start.elapsed();
 
-	// Post-cycle: bundle and (optionally) upload. Both run only on
-	// the happy path — if the cycle bailed with `?` earlier (API
-	// error), this never executes, which is what we want.
+	// Bundle and upload run only on the happy path; an earlier `?`
+	// skips both.
 	if cli.bundle {
 		match crate::bundle::create_tarball(base, date) {
 			Ok(tarball) => ui::status(
@@ -203,11 +182,16 @@ pub async fn run_cycle(
 	Ok(stats)
 }
 
-/// Compact metadata shown in the "Downloading …" line. Kept terse
-/// so it doesn't push the next column off-screen.
+/// Compact `<w>×<h>` shown in the "Downloading …" line.
 fn format_meta(image: &Image) -> String {
 	match (image.width, image.height) {
-		(Some(w), Some(h)) => format!("{}×{}", w, h),
+		(Some(w), Some(h)) => format!("{w}×{h}"),
 		_ => String::new(),
 	}
+}
+
+/// `<id>.<ext>` as written to disk. Kept as one helper so the three
+/// call sites can't drift.
+fn display_name(image: &Image) -> String {
+	format!("{}.{}", image.id, extension_from_url(&image.url))
 }

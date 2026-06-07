@@ -1,8 +1,5 @@
-//! Command-line argument definitions.
-//!
-//! See PLAN.md §5.2 for the canonical surface area. A single `Cli`
-//! struct with no subcommands — the only operational difference between
-//! one-shot and daemon mode is the `--daemon` flag.
+//! Command-line argument definitions. A single `Cli` struct with no
+//! subcommands — one-shot vs. daemon mode is the `--daemon` flag.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -110,20 +107,18 @@ impl Period {
 
 impl std::fmt::Display for Period {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let s = match self {
+		f.write_str(match self {
 			Period::Day => "Day",
 			Period::Week => "Week",
 			Period::Month => "Month",
 			Period::AllTime => "AllTime",
-		};
-		f.write_str(s)
+		})
 	}
 }
 
 // ── SortOrder ──────────────────────────────────────────────────────────────
 
-/// CivitAI `sort` query parameter. The string form is sent verbatim
-/// to the API.
+/// CivitAI `sort` query parameter, sent verbatim to the API.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum SortOrder {
 	MostReactions,
@@ -134,20 +129,19 @@ pub enum SortOrder {
 
 impl std::fmt::Display for SortOrder {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let s = match self {
+		f.write_str(match self {
 			SortOrder::MostReactions => "Most Reactions",
 			SortOrder::MostComments => "Most Comments",
 			SortOrder::Newest => "Newest",
 			SortOrder::Oldest => "Oldest",
-		};
-		f.write_str(s)
+		})
 	}
 }
 
 // ── NsfwLevel ──────────────────────────────────────────────────────────────
 
 /// NSFW browsing level. The numeric bitmask is what the CivitAI API
-/// actually consumes; the mapping is documented in PLAN.md §8.1.
+/// actually consumes.
 ///
 /// TODO(verify): confirm the bit positions against the live API
 /// before shipping a release.
@@ -171,8 +165,8 @@ impl NsfwLevel {
 	}
 }
 
-/// OR a slice of `NsfwLevel` values into a single `browsingLevel`
-/// bitmask. An empty slice is "no filter" (caller should omit the
+/// OR a slice of `NsfwLevel` values into a `browsingLevel` bitmask.
+/// An empty slice is "no filter" (caller should omit the
 /// `browsingLevel` parameter from the request).
 pub fn browsing_level_bitmask(levels: &[NsfwLevel]) -> u32 {
 	levels.iter().fold(0u32, |acc, l| acc | l.bit())
@@ -180,12 +174,11 @@ pub fn browsing_level_bitmask(levels: &[NsfwLevel]) -> u32 {
 
 impl std::fmt::Display for NsfwLevel {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let s = match self {
+		f.write_str(match self {
 			NsfwLevel::None => "None",
 			NsfwLevel::Soft => "Soft",
 			NsfwLevel::Mature => "Mature",
 			NsfwLevel::X => "X",
-		};
-		f.write_str(s)
+		})
 	}
 }

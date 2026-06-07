@@ -1,9 +1,6 @@
-//! Daemon scheduler loop with signal-aware sleep.
-//!
-//! Per PLAN.md §5.6 / success criteria #5: a SIGTERM (or Ctrl+C) lets
-//! the current image finish — the cycle is given the shutdown flag
-//! and checks it between images — and then the daemon exits cleanly
-//! with code 0.
+//! Daemon scheduler loop. A SIGTERM (or Ctrl+C) lets the current
+//! image finish — the cycle is given the shutdown flag and checks it
+//! between images — then the daemon exits cleanly.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,36 +39,25 @@ pub async fn run_daemon(client: &reqwest::Client, cli: &Cli) -> Result<(), Daemo
 	spawn_signal_watcher(shutdown.clone());
 
 	loop {
-		// 0. Pre-cycle flag check. If a signal arrived during the
-		//    previous sleep, skip starting a fresh cycle entirely
-		//    and exit immediately. Without this, a Ctrl+C during
-		//    sleep would start an empty cycle that the cycle's
-		//    per-image check would then immediately abort.
+		// Skip a fresh cycle if a signal arrived during the previous
+		// sleep — otherwise we'd start an empty cycle that the cycle's
+		// own check would abort immediately.
 		if shutdown.load(Ordering::SeqCst) {
 			cleanup_after_shutdown(cli);
 			ui::status(SYM_OK, FOREST, "shutdown signal received, exiting cleanly");
 			return Ok(());
 		}
 
-		// 1. Run one cycle. The cycle checks `shutdown` between
-		//    images and returns early if it's set.
 		let stats = cycle::run_cycle(client, cli, Some(&shutdown)).await?;
 		ui::print_cycle_summary(&stats);
 
-		// 2. Post-cycle flag check (signal may have arrived during
-		//    the cycle, between the top-of-loop check and here).
+		// Signal may have arrived during the cycle.
 		if shutdown.load(Ordering::SeqCst) {
 			cleanup_after_shutdown(cli);
 			ui::status(SYM_OK, FOREST, "shutdown signal received, exiting cleanly");
 			return Ok(());
 		}
 
-		// 3. Sleep, polling the shutdown flag once a second. The
-		//    single signal handler (the spawned watcher) is the
-		//    only thing that ever sets the flag — we don't race
-		//    the sleep against a second `wait_for_signal`, which
-		//    was the cause of the double Ctrl-C log + empty cycle
-		//    bug. Worst-case shutdown latency: 1 s.
 		ui::status(
 			SYM_IDLE,
 			DIM,
@@ -82,11 +68,9 @@ pub async fn run_daemon(client: &reqwest::Client, cli: &Cli) -> Result<(), Daemo
 }
 
 /// Install the signal handlers and spawn a watcher task that flips
-/// the shutdown flag when SIGINT or SIGTERM is received. This is
-/// the **only** place in the daemon that waits for signals — the
-/// sleep path polls the flag instead of racing a second signal
-/// future, which previously caused duplicate "Ctrl-C received" log
-/// lines and a wasted empty cycle on shutdown.
+/// the shutdown flag when SIGINT or SIGTERM is received. This is the
+/// only place in the daemon that waits for signals — the sleep path
+/// polls the flag instead of racing a second signal future.
 fn spawn_signal_watcher(shutdown: Arc<AtomicBool>) {
 	tokio::spawn(async move {
 		wait_for_signal().await;
@@ -95,8 +79,8 @@ fn spawn_signal_watcher(shutdown: Arc<AtomicBool>) {
 }
 
 /// Sleep for `cooldown`, returning early as soon as `shutdown` is
-/// set. Polls once per second; the granularity caps worst-case
-/// shutdown latency at 1 s after the signal lands.
+/// set. Polls once per second, capping worst-case shutdown latency
+/// at 1 s.
 async fn wait_with_shutdown_poll(cooldown: Duration, shutdown: &Arc<AtomicBool>) {
 	let poll_interval = Duration::from_secs(1);
 	let mut remaining = cooldown;
@@ -111,32 +95,28 @@ async fn wait_with_shutdown_poll(cooldown: Duration, shutdown: &Arc<AtomicBool>)
 }
 
 /// Best-effort cleanup of `.partial` files in the current date
-/// partition (PLAN.md §8.4 option 2). Errors are swallowed because
-/// leaving a stray partial on disk is harmless — the dedup check
-/// ignores it and a future run can overwrite it.
+/// partition. Errors are swallowed: a stray partial is harmless
+/// (the dedup check ignores it; a future run can overwrite it).
 fn cleanup_after_shutdown(cli: &Cli) {
 	let date = chrono::Utc::now().date_naive();
 	let partition = storage::partition_dir(&cli.output_dir, date);
 	storage::cleanup_partials(&partition);
 }
 
-/// Format a `Duration` as a short human string (`"24h"`, `"7d"`,
-/// `"30d"`, …). Used in the "Sleeping …" status line.
+/// Short human string for a `Duration` (`"24h"`, `"7d"`, `"30d"`, …).
 fn humanize_duration(d: Duration) -> String {
 	let total_secs = d.as_secs();
 	let days = total_secs / 86_400;
 	let hours = (total_secs % 86_400) / 3600;
 	let minutes = (total_secs % 3600) / 60;
 	if days > 0 {
-		format!("{}d {}h", days, hours)
+		format!("{days}d {hours}h")
 	} else if hours > 0 {
-		format!("{}h {}m", hours, minutes)
+		format!("{hours}h {minutes}m")
 	} else {
-		format!("{}m", minutes)
+		format!("{minutes}m")
 	}
 }
-
-// ── Signal platform shims ──────────────────────────────────────────────────
 
 #[cfg(unix)]
 async fn wait_for_signal() {
@@ -155,11 +135,6 @@ async fn wait_for_signal() {
 			return;
 		}
 	};
-	// Both branches log the same line — we only care that *some*
-	// shutdown signal landed, not which one. The "Ctrl-C received"
-	// wording is what the user typed; the OS might have delivered
-	// SIGTERM (e.g. Docker stop) instead. Either way, the daemon
-	// is shutting down.
 	tokio::select! {
 		_ = sigterm.recv() => {}
 		_ = sigint.recv()  => {}

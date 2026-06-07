@@ -1,9 +1,5 @@
-//! CivitAI REST client.
-//!
-//! One async function (`fetch_popular`) does the work for the
-//! `/api/v1/images` endpoint, with exponential backoff on 429 / 5xx
-//! responses (1s → 2s → 4s, up to 3 retries, max 4 attempts total —
-//! see PLAN.md §2).
+//! CivitAI REST client. `fetch_popular` handles the `/api/v1/images`
+//! endpoint with exponential backoff on 429 / 5xx responses.
 
 use std::time::Duration;
 
@@ -31,12 +27,8 @@ pub enum ApiError {
 	#[error("rate-limited after {attempts} attempt(s)")]
 	RateLimited { attempts: u32 },
 
-	/// Short, user-facing description of a transport-level failure
-	/// (timeout, connection refused, decode failure, …). We deliberately
-	/// do not store the full `reqwest::Error` here because its
-	/// `Display` nests the URL three levels deep, producing an
-	/// unreadable error line. The full chain is still available via
-	/// `RUST_LOG=civistash=trace`.
+	/// One-line, user-facing transport error (timeout, connection refused,
+	/// decode failure, …). The full chain is still available via `RUST_LOG`.
 	#[error("transport error: {0}")]
 	Transport(String),
 
@@ -44,9 +36,8 @@ pub enum ApiError {
 	Parse(#[from] serde_json::Error),
 }
 
-/// Route any `reqwest::Error` that escapes via `?` (e.g. from
-/// `resp.json().await?`) through the same user-friendly description
-/// we use for transport errors during the retry loop.
+/// Route any `reqwest::Error` that escapes via `?` through the same
+/// user-friendly description used for transport errors in the retry loop.
 impl From<reqwest::Error> for ApiError {
 	fn from(e: reqwest::Error) -> Self {
 		ApiError::Transport(describe_transport_error(e))
@@ -54,11 +45,8 @@ impl From<reqwest::Error> for ApiError {
 }
 
 /// Collapse a `reqwest::Error` to a single-line, user-readable
-/// description. Drops the URL (already implicit from the CLI context)
-/// and the nested error chain.
-///
-/// Takes ownership because `Error::without_url` consumes `self`. The
-/// caller has the `reqwest::Error` in hand either way.
+/// description. Takes ownership because `Error::without_url` consumes
+/// `self`.
 fn describe_transport_error(e: reqwest::Error) -> String {
 	if e.is_timeout() {
 		"request timed out".to_string()
@@ -82,7 +70,7 @@ fn describe_transport_error(e: reqwest::Error) -> String {
 
 // ── Public types ───────────────────────────────────────────────────────────
 
-/// Per-image statistics block in the API response.
+/// Per-image statistics in the API response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageStats {
@@ -96,17 +84,13 @@ pub struct ImageStats {
 	pub extra: serde_json::Value,
 }
 
-/// A single image object in the response. All API fields not modelled
-/// explicitly are captured in `extra` so the sidecar is a complete
-/// verbatim copy of the upstream JSON.
-///
-/// A handful of fields (`nsfw_level`, `username`, `base_model`) are
-/// captured as raw `serde_json::Value` because CivitAI has been seen
-/// returning them as different JSON types depending on the image
-/// (e.g. `username` is a string for normal users but an integer ID
-/// for deleted/anonymous accounts; `nsfw_level` is sometimes a
-/// string like `"None"`, sometimes an integer). The original type
-/// is preserved in the sidecar so no information is lost.
+/// A single image object in the response. Fields not modelled explicitly
+/// are captured in `extra` so the sidecar is a verbatim copy of the
+/// upstream JSON. A handful of fields (`nsfw_level`, `username`,
+/// `base_model`) use raw `serde_json::Value` because CivitAI has been
+/// observed returning them as different JSON types depending on the
+/// image (e.g. `username` is a string for normal users but an integer
+/// ID for deleted/anonymous accounts).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Image {
@@ -130,18 +114,16 @@ pub struct Image {
 	pub meta: Option<serde_json::Value>,
 
 	/// Any fields not explicitly modelled land here. The sidecar
-	/// writer flattens this back out, so the on-disk JSON looks
-	/// identical to the API response.
+	/// writer flattens this back out so on-disk JSON matches the
+	/// API response verbatim.
 	#[serde(flatten)]
 	pub extra: serde_json::Value,
 }
 
 impl Image {
-	/// True if this entry should be filtered out of the cycle. The
-	/// `allow_all` flag toggles whether any non-`image` media type
-	/// (videos, audio, unknown, …) is kept. With `allow_all = false`
-	/// (the default), only `media_type = "image"` (or absent) is
-	/// kept.
+	/// True if this entry should be filtered out of the cycle. With
+	/// `allow_all = false` (the default), only `media_type = "image"`
+	/// or absent type is kept.
 	pub fn is_filtered(&self, allow_all: bool) -> bool {
 		match self.media_type.as_deref() {
 			Some("image") | None => false,
@@ -154,31 +136,26 @@ impl Image {
 #[derive(Debug, Deserialize)]
 pub struct ImagesResponse {
 	pub items: Vec<Image>,
-	/// Pagination block. The `nextCursor` field (a string) is the
-	/// opaque cursor for the next page; an absent or empty value
-	/// signals "no more pages".
+	/// Opaque cursor for the next page; absent or empty means
+	/// "no more pages".
 	#[serde(default)]
 	pub metadata: serde_json::Value,
 }
 
 // ── Public entry point ─────────────────────────────────────────────────────
 
-/// Maximum items CivitAI's `/api/v1/images` returns in a single
-/// request. When the user asks for more, the public `fetch_popular`
-/// transparently pages with `cursor`.
+/// Max items CivitAI's `/api/v1/images` returns per request. When the
+/// user asks for more, `fetch_popular` pages with `cursor`.
 const PER_PAGE_MAX: u32 = 200;
 
 /// Fetch the top *N* popular images from CivitAI.
 ///
-/// `limit` is the **total** number of images desired. If it exceeds
-/// `PER_PAGE_MAX`, this function makes multiple requests chained by
-/// the `cursor` query parameter until either the limit is reached
-/// or the API signals no more pages (empty/absent `nextCursor`).
-///
-/// Each individual page request honours the same 1 s / 2 s / 4 s
-/// backoff (3 retries) on 429, 5xx, and transport errors as the
-/// original single-request design. A failed page aborts the whole
-/// fetch — we do not return partial results across pages.
+/// If `limit` exceeds `PER_PAGE_MAX`, multiple requests are chained
+/// using `cursor` until the limit is reached or the API signals no
+/// more pages. Each page request uses the same 1 s / 2 s / 4 s backoff
+/// (3 retries) on 429, 5xx, and transport errors. A failed page
+/// aborts the whole fetch — partial results across pages are not
+/// returned.
 pub async fn fetch_popular(
 	client: &reqwest::Client,
 	ca_token: Option<&str>,
@@ -192,7 +169,7 @@ pub async fn fetch_popular(
 	}
 
 	let per_page = limit.min(PER_PAGE_MAX);
-	let mut all_items: Vec<Image> = Vec::with_capacity(limit as usize);
+	let mut all_items = Vec::with_capacity(limit as usize);
 	let mut cursor: Option<String> = None;
 
 	loop {
@@ -231,9 +208,8 @@ pub async fn fetch_popular(
 	Ok(all_items)
 }
 
-/// Single request to `/api/v1/images` with the given `cursor` (or
-/// `None` for the first page). Returns the parsed items and the
-/// API-supplied cursor for the *next* page (if any).
+/// Single request to `/api/v1/images`. Returns parsed items and the
+/// API-supplied cursor for the next page (if any).
 async fn fetch_one_page(
 	client: &reqwest::Client,
 	ca_token: Option<&str>,
@@ -249,7 +225,6 @@ async fn fetch_one_page(
 		qp.append_pair("sort", &sort.to_string());
 		qp.append_pair("period", &period.to_string());
 		qp.append_pair("limit", &per_page.to_string());
-		// PLAN.md §8.2 — always request generation metadata.
 		qp.append_pair("withMeta", "true");
 		if !nsfw_level.is_empty() {
 			qp.append_pair(
@@ -279,10 +254,7 @@ async fn fetch_one_page(
 			req = req.bearer_auth(t);
 		}
 
-		// Send + handle transport errors. Plan §2 says "Honour HTTP 429
-		// and 5xx responses" but a transport-level timeout is morally
-		// the same as a 5xx from the client's perspective, so it gets
-		// the same retry treatment.
+		// Transport errors get the same retry treatment as 429/5xx.
 		let resp = match req.send().await {
 			Ok(r) => r,
 			Err(e) => {
@@ -307,8 +279,7 @@ async fn fetch_one_page(
 			return Ok((parsed.items, next_cursor));
 		}
 
-		// Capture the body (truncated) for diagnostics, but never let a
-		// body read loop forever.
+		// Truncate body to avoid unbounded reads.
 		let body = resp
 			.text()
 			.await
@@ -351,10 +322,9 @@ async fn fetch_one_page(
 	}
 }
 
-/// Extract the `nextCursor` field from the response metadata, or
-/// `None` if absent / empty. The API uses an empty string (rather
-/// than `null`) to signal "no more pages" on the last page, so we
-/// filter both.
+/// Extract `nextCursor` from response metadata, or `None` if absent
+/// / empty. The API uses an empty string (rather than `null`) to signal
+/// "no more pages" on the last page, so we filter both.
 fn extract_next_cursor(metadata: &serde_json::Value) -> Option<String> {
 	metadata
 		.get("nextCursor")

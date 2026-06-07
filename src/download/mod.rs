@@ -1,9 +1,7 @@
-//! Image binary downloader with atomic writes.
-//!
-//! Each download writes to a `.partial` file first and renames to the
-//! final path on success. The same exponential backoff (1s → 2s →
-//! 4s, 3 retries) used by the API client applies here — see PLAN.md
-//! §5.4.
+//! Image binary downloader with atomic writes. Each download writes
+//! to a `.partial` file first and renames to the final path on
+//! success. Uses the same exponential backoff (1s → 2s → 4s, 3
+//! retries) as the API client.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -18,23 +16,20 @@ use tracing::debug;
 use crate::api::Image;
 use crate::storage::extension_from_url;
 
-/// What happened to one image. The cycle uses this to update its
-/// per-image counters without having to plumb a result type up.
+/// Outcome of one image. The cycle uses this to update per-image
+/// counters without having to plumb a result type up.
 #[derive(Debug)]
 pub enum DownloadOutcome {
-	/// The image was downloaded and lives at the returned path.
+	/// Image downloaded successfully; lives at the returned path.
 	Ok(PathBuf),
-	/// An image with this CivitAI ID already exists in the output
-	/// directory (dedup hit).
+	/// An image with this CivitAI ID already exists (dedup hit).
 	Skipped,
-	/// The download failed; the message is human-readable and safe
-	/// to log.
+	/// Download failed; the message is human-readable and safe to log.
 	Failed(String),
 }
 
-/// Internal error type used while composing the download. Converted to
-/// `DownloadOutcome::Failed` at the boundary so callers don't need to
-/// import a per-download error.
+/// Internal error type. Converted to `DownloadOutcome::Failed` at the
+/// boundary so callers don't import a per-download error.
 #[derive(Debug, Error)]
 enum DownloadError {
 	#[error("HTTP {status} after {attempts} attempt(s)")]
@@ -47,9 +42,8 @@ enum DownloadError {
 	Io(#[from] std::io::Error),
 }
 
-/// Download one image, with the same backoff contract as the API
-/// client. On any failure, cleans up the partial file before
-/// returning `Failed`.
+/// Download one image. On any failure, cleans up the partial file
+/// before returning `Failed`.
 pub async fn download_image(
 	client: &reqwest::Client,
 	image: &Image,
@@ -103,9 +97,8 @@ pub async fn download_image(
 }
 
 /// Single-attempt download. Streams the response body into the
-/// `.partial` file. Any error that escapes here is considered
-/// retryable by the caller **only** for transport and 5xx/429
-/// statuses; everything else is a final failure.
+/// `.partial` file. The caller retries transport and 5xx/429 errors;
+/// everything else is treated as a final failure.
 async fn try_once(
 	client: &reqwest::Client,
 	url: &str,
