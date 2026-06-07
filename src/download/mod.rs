@@ -1,8 +1,3 @@
-//! Image binary downloader with atomic writes. Each download writes
-//! to a `.partial` file first and renames to the final path on
-//! success. Uses the same exponential backoff (1s → 2s → 4s, 3
-//! retries) as the API client.
-
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -16,20 +11,13 @@ use tracing::debug;
 use crate::api::Image;
 use crate::storage::extension_from_url;
 
-/// Outcome of one image. The cycle uses this to update per-image
-/// counters without having to plumb a result type up.
 #[derive(Debug)]
 pub enum DownloadOutcome {
-	/// Image downloaded successfully; lives at the returned path.
 	Ok(PathBuf),
-	/// An image with this CivitAI ID already exists (dedup hit).
 	Skipped,
-	/// Download failed; the message is human-readable and safe to log.
 	Failed(String),
 }
 
-/// Internal error type. Converted to `DownloadOutcome::Failed` at the
-/// boundary so callers don't import a per-download error.
 #[derive(Debug, Error)]
 enum DownloadError {
 	#[error("HTTP {status} after {attempts} attempt(s)")]
@@ -42,8 +30,8 @@ enum DownloadError {
 	Io(#[from] std::io::Error),
 }
 
-/// Download one image. On any failure, cleans up the partial file
-/// before returning `Failed`.
+/// Download one image to `.partial`, then rename on success. Exits early
+/// if the final path already exists. Cleans up the partial on failure.
 pub async fn download_image(
 	client: &reqwest::Client,
 	image: &Image,
@@ -54,9 +42,6 @@ pub async fn download_image(
 	let partial_path = dest_dir.join(format!("{}.{}.partial", image.id, ext));
 
 	if final_path.exists() {
-		// Defensive: the cycle's dedup scan should have caught this
-		// already, but a concurrent run or a manual file drop is
-		// possible.
 		return DownloadOutcome::Skipped;
 	}
 
@@ -82,7 +67,6 @@ pub async fn download_image(
 				let is_retryable = matches!(&e, DownloadError::Http { status, .. } if *status == 429 || (500..600).contains(status))
 					|| matches!(&e, DownloadError::Transport(_));
 				if !is_retryable || attempt == backoff.len() {
-					// Final attempt (or non-retryable). Clean up.
 					let _ = fs::remove_file(&partial_path).await;
 					return DownloadOutcome::Failed(e.to_string());
 				}
@@ -96,9 +80,7 @@ pub async fn download_image(
 	DownloadOutcome::Failed("retry budget exhausted".to_string())
 }
 
-/// Single-attempt download. Streams the response body into the
-/// `.partial` file. The caller retries transport and 5xx/429 errors;
-/// everything else is treated as a final failure.
+/// Single attempt. Streams the response body into `.partial`.
 async fn try_once(
 	client: &reqwest::Client,
 	url: &str,

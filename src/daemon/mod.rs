@@ -1,9 +1,5 @@
-//! Daemon scheduler loop. A SIGTERM (or Ctrl+C) lets the current
-//! image finish — the cycle is given the shutdown flag and checks it
-//! between images — then the daemon exits cleanly.
-
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
@@ -27,7 +23,8 @@ pub enum DaemonError {
 	Signal(#[from] std::io::Error),
 }
 
-/// Run the daemon loop until a shutdown signal arrives.
+/// Run the daemon loop. A SIGTERM (or Ctrl+C) lets the current image finish
+/// before the daemon exits cleanly.
 pub async fn run_daemon(client: &reqwest::Client, cli: &Cli) -> Result<(), DaemonError> {
 	let cooldown = cli
 		.period
@@ -39,9 +36,6 @@ pub async fn run_daemon(client: &reqwest::Client, cli: &Cli) -> Result<(), Daemo
 	spawn_signal_watcher(shutdown.clone());
 
 	loop {
-		// Skip a fresh cycle if a signal arrived during the previous
-		// sleep — otherwise we'd start an empty cycle that the cycle's
-		// own check would abort immediately.
 		if shutdown.load(Ordering::SeqCst) {
 			cleanup_after_shutdown(cli);
 			ui::status(SYM_OK, FOREST, "shutdown signal received, exiting cleanly");
@@ -51,7 +45,6 @@ pub async fn run_daemon(client: &reqwest::Client, cli: &Cli) -> Result<(), Daemo
 		let stats = cycle::run_cycle(client, cli, Some(&shutdown)).await?;
 		ui::print_cycle_summary(&stats);
 
-		// Signal may have arrived during the cycle.
 		if shutdown.load(Ordering::SeqCst) {
 			cleanup_after_shutdown(cli);
 			ui::status(SYM_OK, FOREST, "shutdown signal received, exiting cleanly");
@@ -67,10 +60,6 @@ pub async fn run_daemon(client: &reqwest::Client, cli: &Cli) -> Result<(), Daemo
 	}
 }
 
-/// Install the signal handlers and spawn a watcher task that flips
-/// the shutdown flag when SIGINT or SIGTERM is received. This is the
-/// only place in the daemon that waits for signals — the sleep path
-/// polls the flag instead of racing a second signal future.
 fn spawn_signal_watcher(shutdown: Arc<AtomicBool>) {
 	tokio::spawn(async move {
 		wait_for_signal().await;
@@ -78,9 +67,7 @@ fn spawn_signal_watcher(shutdown: Arc<AtomicBool>) {
 	});
 }
 
-/// Sleep for `cooldown`, returning early as soon as `shutdown` is
-/// set. Polls once per second, capping worst-case shutdown latency
-/// at 1 s.
+/// Sleep for `cooldown`, polling the shutdown flag once per second.
 async fn wait_with_shutdown_poll(cooldown: Duration, shutdown: &Arc<AtomicBool>) {
 	let poll_interval = Duration::from_secs(1);
 	let mut remaining = cooldown;
@@ -94,16 +81,12 @@ async fn wait_with_shutdown_poll(cooldown: Duration, shutdown: &Arc<AtomicBool>)
 	}
 }
 
-/// Best-effort cleanup of `.partial` files in the current date
-/// partition. Errors are swallowed: a stray partial is harmless
-/// (the dedup check ignores it; a future run can overwrite it).
 fn cleanup_after_shutdown(cli: &Cli) {
 	let date = chrono::Utc::now().date_naive();
 	let partition = storage::partition_dir(&cli.output_dir, date);
 	storage::cleanup_partials(&partition);
 }
 
-/// Short human string for a `Duration` (`"24h"`, `"7d"`, `"30d"`, …).
 fn humanize_duration(d: Duration) -> String {
 	let total_secs = d.as_secs();
 	let days = total_secs / 86_400;
@@ -120,7 +103,7 @@ fn humanize_duration(d: Duration) -> String {
 
 #[cfg(unix)]
 async fn wait_for_signal() {
-	use tokio::signal::unix::{SignalKind, signal};
+	use tokio::signal::unix::{signal, SignalKind};
 	let mut sigterm = match signal(SignalKind::terminate()) {
 		Ok(s) => s,
 		Err(e) => {

@@ -2,7 +2,7 @@
 name         = "civistash"
 version      = "0.1.0"
 edition      = "2024"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 description  = "Archiver for popular CivitAI images with full metadata sidecars"
 license      = "MIT"
 
@@ -11,62 +11,22 @@ name = "civistash"
 path = "src/main.rs"
 
 [dependencies]
-# ── Async Runtime ─────────────────────────────────────────
-# Note: §5.6 of PLAN.md requires tokio::signal for the daemon's signal
-# race. This crate was not listed in the §3 dependency table — added here
-# with the minimum feature set needed by the code in this crate.
-tokio         = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
-
-# ── Command-Line Interface ─────────────────────────────────
-clap         = { version = "4", features = ["derive", "env"] }
-
-# ── Logging ────────────────────────────────────────────────
+tokio              = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+clap               = { version = "4", features = ["derive", "env"] }
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+owo-colors         = { version = "4", features = ["supports-colors"] }
+reqwest            = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "json", "stream"] }
+futures            = "0.3"
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+chrono             = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+anyhow             = "1"
+thiserror          = "2"
+tar                = "0.4"
+flate2             = "1"
+hf-hub             = "1.0.0-rc.1"
 
-# ── Terminal Output ────────────────────────────────────────
-owo-colors   = { version = "4", features = ["supports-colors"] }
-
-# ── HTTP Client ────────────────────────────────────────────
-# Note: PLAN.md §3 listed `rustls-tls` as the reqwest feature, but
-# reqwest 0.13 renamed it to `rustls` and split cert handling into
-# separate features. `webpki-roots` bundles Mozilla's CA set so the
-# binary stays self-contained and works on the distroless image
-# (no OS-provided CA store).
-reqwest      = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "json", "stream"] }
-futures      = "0.3"
-
-# ── Serialization ──────────────────────────────────────────
-serde        = { version = "1", features = ["derive"] }
-serde_json   = "1"
-
-# ── Time ───────────────────────────────────────────────────
-chrono       = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-
-# ── Error Handling ─────────────────────────────────────────
-anyhow       = "1"
-thiserror    = "2"
-
-# ── Bundling & Compression ──────────────────────────────────
-# Used by src/bundle/mod.rs to produce .tar.gz archives of the
-# date-partitioned output (for HF dataset upload workflows).
-tar         = "0.4"
-flate2      = "1"
-
-# ── Hugging Face Hub Client ────────────────────────────────
-# Pure-Rust async client for the HF Hub. Used for dataset
-# uploads via the builder pattern (`HFClient::builder()` →
-# `client.dataset(ns, name).upload_file()…send()`). The token
-# is passed explicitly through the builder when the user supplies
-# `--hf-token`; otherwise the crate's own `HF_TOKEN` resolution
-# runs (`HF_TOKEN` env, `~/.cache/huggingface/token`, …).
-#
-# Async is the default in 1.0+ — there's no longer a `tokio`
-# feature flag. We don't enable the `blocking` (sync) feature
-# since we run on a tokio runtime.
-hf-hub      = "1.0.0-rc.1"
-
-# ── Release Profile ────────────────────────────────────────
 [profile.release]
 opt-level     = 3
 lto           = "fat"

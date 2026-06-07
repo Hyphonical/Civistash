@@ -1,12 +1,9 @@
-//! Per-cycle orchestrator. The daemon passes an optional shutdown
-//! flag that the cycle checks between images, so a signal received
-//! during a cycle lets the current image finish before returning.
-
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use chrono::Days;
 use owo_colors::OwoColorize;
 use tracing::{info, warn};
 
@@ -15,15 +12,13 @@ use crate::cli::Cli;
 use crate::download::{self, DownloadOutcome};
 use crate::storage::{self, extension_from_url};
 use crate::ui::{
-	self, BRICK, CycleStats, DIM, EMBER, FOREST, SYM_FAIL, SYM_FILTER, SYM_OK, SYM_PROGRESS,
-	SYM_SKIP, humanize_bytes,
+	self, humanize_bytes, BRICK, CycleStats, DIM, EMBER, FOREST, SYM_FAIL, SYM_FILTER, SYM_OK,
+	SYM_PROGRESS, SYM_SKIP,
 };
 
-/// Run one fetch cycle and return its per-image counters.
-///
-/// When `shutdown` is `Some` and its flag is set, the cycle finishes
-/// the current image (writing its sidecar) and returns. The in-flight
-/// HTTP request is not aborted.
+/// Run one fetch cycle. When `shutdown` is `Some` and its flag is set, the
+/// cycle finishes the current image and returns — the in-flight HTTP request
+/// is not aborted.
 pub async fn run_cycle(
 	client: &reqwest::Client,
 	cli: &Cli,
@@ -39,6 +34,8 @@ pub async fn run_cycle(
 		all_types = cli.all_types,
 		"fetching popular images"
 	);
+
+	check_disk_usage(&cli.output_dir);
 
 	let items = api::fetch_popular(
 		client,
@@ -114,7 +111,8 @@ pub async fn run_cycle(
 							.unwrap_or(&final_path)
 							.to_string_lossy()
 							.into_owned();
-						let size = std::fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0);
+						let size =
+							std::fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0);
 						ui::status(
 							SYM_OK,
 							FOREST,
@@ -152,8 +150,6 @@ pub async fn run_cycle(
 
 	stats.duration = start.elapsed();
 
-	// Bundle and upload run only on the happy path; an earlier `?`
-	// skips both.
 	let mut upload_succeeded = false;
 	if cli.bundle {
 		match crate::bundle::create_tarball(base, date) {
@@ -179,27 +175,26 @@ pub async fn run_cycle(
 		}
 	}
 
-	// --delete-after: clean up after a successful round-trip.
-	//
-	// 1. The tarball is deleted immediately — Hugging Face has the
-	//    same bytes, so the local copy is pure waste.
-	// 2. Date partitions are kept for 2 days (today + yesterday) to
-	//    cover the rolling 24h window that CivitAI uses for
-	//    `period=Day`. If the daemon restarts mid-cycle, yesterday's
-	//    files are still there for dedup, preventing duplicate
-	//    uploads. Partitions 3+ days old are removed.
-	//
-	// A failed upload preserves everything so the next cycle can retry.
+	// --delete-after: tarball deleted immediately (HF has the bytes).
+	// Date partitions kept for 2 days (today + yesterday) to cover the
+	// rolling 24h window CivitAI uses for period=Day. Preserves
+	// everything on upload failure so the next cycle can retry.
 	if cli.delete_after && upload_succeeded {
 		let tarball = base.join(format!("{}.tar.gz", date.format("%Y-%m-%d")));
 		storage::delete_tarball(&tarball);
 		storage::delete_old_partitions(base, date, 2);
+
+		let cutoff = date
+			.checked_sub_days(Days::new(2))
+			.map(|d| d.format("%Y-%m-%d").to_string())
+			.unwrap_or_else(|| "".into());
 		ui::status(
 			SYM_OK,
 			DIM,
 			format!(
-				"Cleaned     → {} (local files removed)",
-				date.format("%Y-%m-%d").to_string().style(EMBER)
+				"Cleaned     → {} (tarball removed, partitions ≤ {} deleted)",
+				date.format("%Y-%m-%d").to_string().style(EMBER),
+				cutoff,
 			),
 		);
 	}
@@ -207,7 +202,6 @@ pub async fn run_cycle(
 	Ok(stats)
 }
 
-/// Compact `<w>×<h>` shown in the "Downloading …" line.
 fn format_meta(image: &Image) -> String {
 	match (image.width, image.height) {
 		(Some(w), Some(h)) => format!("{w}×{h}"),
@@ -215,8 +209,27 @@ fn format_meta(image: &Image) -> String {
 	}
 }
 
-/// `<id>.<ext>` as written to disk. Kept as one helper so the three
-/// call sites can't drift.
 fn display_name(image: &Image) -> String {
 	format!("{}.{}", image.id, extension_from_url(&image.url))
+}
+
+/// Warn if the stash exceeds 5 GB (~200 full-resolution images × 25 MB
+/// across 2 days of retention). Skips if the directory doesn't exist.
+const STASH_WARN_BYTES: u64 = 5_000_000_000;
+
+fn check_disk_usage(base: &std::path::Path) {
+	if !base.exists() {
+		return;
+	}
+	let usage = storage::disk_usage(base);
+	if usage > STASH_WARN_BYTES {
+		ui::status(
+			SYM_FAIL,
+			BRICK,
+			format!(
+				"stash directory is {} (≥ 5 GB) — consider adding --delete-after",
+				humanize_bytes(usage).bold(),
+			),
+		);
+	}
 }

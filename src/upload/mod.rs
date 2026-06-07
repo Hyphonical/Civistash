@@ -1,16 +1,7 @@
-//! Hugging Face dataset upload via the `hf-hub` Rust client.
-//!
-//! Pure-Rust async client — no shell-out, no `tokio::process`,
-//! no env-var mutation, no direct HF REST calls. The token is
-//! passed explicitly through the client's builder; the
-//! `HUGGINGFACE_TOKEN` env var is only consulted as a fallback
-//! when `--hf-token` is unset (in which case `HFClient::new()`
-//! reads it for us).
-
 use std::path::Path;
 
-use hf_hub::HFClient;
 use hf_hub::repository::AddSource;
+use hf_hub::HFClient;
 use thiserror::Error;
 use tracing::info;
 
@@ -29,14 +20,11 @@ pub enum UploadError {
 	Hub(#[from] hf_hub::HFError),
 }
 
-/// Upload a tarball to a HF dataset repo. The file lands at the
-/// repo root with its basename as the path — e.g. uploading
-/// `2026-06-07.tar.gz` to `my-org/my-dataset` puts it at
-/// `2026-06-07.tar.gz` in the repo.
+/// Upload a tarball to a Hugging Face dataset repo. The file lands at
+/// the repo root with its basename as the path.
 ///
-/// `token`, if `Some`, takes precedence over `HF_TOKEN` for
-/// this call. If `None`, the `hf-hub` crate's default token
-/// resolution runs (`HF_TOKEN` env var, then
+/// `token`, when `Some`, takes precedence over `HF_TOKEN`. When `None`,
+/// `hf-hub`'s default token resolution runs (`HF_TOKEN` env, then
 /// `~/.cache/huggingface/token`).
 pub async fn upload_to_hf(
 	tarball: &Path,

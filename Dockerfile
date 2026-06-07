@@ -1,5 +1,7 @@
 # ── Stage 1: Build ────────────────────────────────────────
-FROM rust:1.88-slim AS builder
+# konst 0.4.3 and redb 3.1.3 (transitive deps via hf-hub) require
+# rustc >= 1.89.0. Keep this in sync with Cargo.toml rust-version.
+FROM rust:1.89-slim AS builder
 
 WORKDIR /build
 
@@ -42,12 +44,10 @@ USER nonroot
 WORKDIR /stash
 VOLUME ["/stash"]
 
-ENV CIVITAI_TOKEN=""
-# `HUGGINGFACE_TOKEN` is the user-facing env var. We forward it
-# to `HF_TOKEN` (the name the `hf` / `huggingface-cli` tools
-# expect) at container start so the user only has to set one.
-ENV HUGGINGFACE_TOKEN=""
-ENV HF_TOKEN=${HUGGINGFACE_TOKEN}
+# No ENV placeholders for tokens — supply them at runtime via
+# `docker run -e CIVITAI_TOKEN=...` or a docker-compose .env file.
+# The binary reads CIVITAI_TOKEN and HUGGINGFACE_TOKEN directly
+# (clap `env = "..."` derive), so no forwarding is needed.
 ENV RUST_LOG=info
 
 ENTRYPOINT ["/usr/local/bin/civistash"]
