@@ -15,8 +15,8 @@
 #   CIVITAI_TOKEN=eyJ...       # from civitai.com → Account Settings
 #   HUGGINGFACE_TOKEN=hf_...   # from huggingface.co → Settings → Tokens
 #
-# Mount the host path `./stash` to the container's `/stash` so
-# the bundle and sidecars persist across container restarts.
+# Data lives in a named Docker volume so the `nonroot` user inside
+# the container can write without host UID conflicts.
 
 services:
   civistash:
@@ -32,7 +32,7 @@ services:
       HUGGINGFACE_TOKEN: ${HUGGINGFACE_TOKEN:-}
       RUST_LOG: info
     volumes:
-      - ./stash:/stash
+      - stash-data:/stash
     # Daily daemon, all NSFW levels (none+soft+mature+x), all
     # media types (image+video+audio), and bundle each cycle into
     # a `.tar.gz` next to the date partition. Change `--period` to
@@ -52,3 +52,6 @@ services:
       --limit 200
       # --upload-hf hyphonical/civistash-daily
       # --delete-after
+
+volumes:
+  stash-data:

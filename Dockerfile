@@ -42,7 +42,6 @@ COPY LICENSE /LICENSE
 
 USER nonroot
 WORKDIR /stash
-RUN mkdir -p /stash && chown nonroot:nonroot /stash
 VOLUME ["/stash"]
 
 # No ENV placeholders for tokens — supply them at runtime via
