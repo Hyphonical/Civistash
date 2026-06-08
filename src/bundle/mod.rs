@@ -1,3 +1,4 @@
+use std::fs;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -24,9 +25,17 @@ pub enum BundleError {
 
 /// Tar+gzip the contents of `<base>/<date>/` into `<base>/<date>.tar.gz`.
 ///
-/// The archive's top-level directory is the date string (e.g. `2026-06-07/`)
-/// so the bundle extracts to a clean directory. If the date directory does
-/// not exist (first run), an effectively-empty tarball is still created.
+/// Entries are added at the **tarball root** with their basename only
+/// (e.g. `12345.png`, `12345.json`) — no date directory prefix. This makes
+/// the archive a valid WebDataset: paired files share the same stem and
+/// the Hugging Face dataset viewer can group them into rows.
+///
+/// `archive_date` is recorded inside each sidecar JSON's `_civistash`
+/// block by `storage::write_sidecar`, so the date is preserved without
+/// the directory prefix.
+///
+/// If the date directory does not exist (first run), an effectively-empty
+/// tarball is still created.
 pub fn create_tarball(base: &Path, date: NaiveDate) -> Result<PathBuf, BundleError> {
 	let partition = partition_dir(base, date);
 	let tarball_path = base.join(format!("{}.tar.gz", date.format("%Y-%m-%d")));
@@ -39,11 +48,29 @@ pub fn create_tarball(base: &Path, date: NaiveDate) -> Result<PathBuf, BundleErr
 	let mut tar = tar::Builder::new(enc);
 
 	if partition.is_dir() {
-		tar.append_dir_all(date.format("%Y-%m-%d").to_string(), &partition)
-			.map_err(|source| BundleError::Append {
+		let entries = fs::read_dir(&partition).map_err(|source| BundleError::Append {
+			entry: partition.clone(),
+			source,
+		})?;
+		for entry in entries {
+			let entry = entry.map_err(|source| BundleError::Append {
 				entry: partition.clone(),
 				source,
 			})?;
+			let path = entry.path();
+			if !path.is_file() {
+				continue;
+			}
+			let name = path.file_name().ok_or_else(|| BundleError::Append {
+				entry: path.clone(),
+				source: io::Error::new(io::ErrorKind::InvalidInput, "missing filename"),
+			})?;
+			tar.append_path_with_name(&path, name)
+				.map_err(|source| BundleError::Append {
+					entry: path.clone(),
+					source,
+				})?;
+		}
 	}
 
 	tar.finish()
