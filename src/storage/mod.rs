@@ -34,13 +34,13 @@ pub fn today_partition_dir(base: &Path) -> PathBuf {
 
 /// Ensure a directory exists, including parents. Idempotent.
 pub fn ensure_dir(path: &Path) -> Result<(), StorageError> {
-	if let Err(source) = fs::create_dir_all(path) {
-		if source.kind() != ErrorKind::AlreadyExists {
-			return Err(StorageError::DirCreate {
-				path: path.to_path_buf(),
-				source,
-			});
-		}
+	if let Err(source) = fs::create_dir_all(path)
+		&& source.kind() != ErrorKind::AlreadyExists
+	{
+		return Err(StorageError::DirCreate {
+			path: path.to_path_buf(),
+			source,
+		});
 	}
 	Ok(())
 }
@@ -66,10 +66,10 @@ pub fn id_exists_anywhere(base: &Path, id: i64) -> bool {
 			if p.extension().and_then(|s| s.to_str()) == Some("partial") {
 				continue;
 			}
-			if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-				if stem == id_str || stem.starts_with(&format!("{id}.")) {
-					return true;
-				}
+			if let Some(stem) = p.file_stem().and_then(|s| s.to_str())
+				&& (stem == id_str || stem.starts_with(&format!("{id}.")))
+			{
+				return true;
 			}
 		}
 	}
