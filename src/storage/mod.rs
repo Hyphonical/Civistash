@@ -102,15 +102,21 @@ pub fn write_sidecar(
 	let mut value = serde_json::to_value(image)
 		.expect("Image serialisation should never fail (no Map<non-string> keys)");
 	if let Some(obj) = value.as_object_mut() {
+		let archive_date = date.format("%Y-%m-%d").to_string();
+		let stored_as = local_path
+			.strip_prefix(base)
+			.unwrap_or(local_path)
+			.to_string_lossy()
+			.replace('\\', "/");
 		obj.insert(
-			"downloaded_at".to_string(),
-			json!(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)),
+			"_civistash".to_string(),
+			json!({
+				"downloaded_at": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+				"source_url": source_url,
+				"stored_as": stored_as,
+				"archive_date": archive_date,
+			}),
 		);
-		obj.insert(
-			"local_path".to_string(),
-			json!(local_path.to_string_lossy()),
-		);
-		obj.insert("source_url".to_string(), json!(source_url));
 	}
 
 	let sidecar_path = partition.join(format!("{}.json", image.id));

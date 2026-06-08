@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::cli::{browsing_level_bitmask, NsfwLevel};
 
 const API_BASE: &str = "https://civitai.com/api/v1/images";
-const USER_AGENT: &str = concat!("civistash/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("Civistash/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Error)]
 pub enum ApiError {

@@ -11,6 +11,8 @@ use tracing::debug;
 use crate::api::Image;
 use crate::storage::extension_from_url;
 
+const USER_AGENT: &str = concat!("Civistash/", env!("CARGO_PKG_VERSION"));
+
 #[derive(Debug)]
 pub enum DownloadOutcome {
 	Ok(PathBuf),
@@ -88,7 +90,7 @@ async fn try_once(
 ) -> Result<(), DownloadError> {
 	let resp = client
 		.get(url)
-		.header(reqwest::header::USER_AGENT, "civistash")
+		.header(reqwest::header::USER_AGENT, USER_AGENT)
 		.send()
 		.await?;
 	let status = resp.status();

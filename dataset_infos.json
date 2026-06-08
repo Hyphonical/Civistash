@@ -1,0 +1,136 @@
+{
+  "archive": {
+    "description": "Daily snapshots of the top CivitAI images with full metadata sidecars, packaged as timestamped .tar.gz files.",
+    "citation": "@misc{civistash2026,\n  author = {Hyphonical},\n  title = {Civistash: Daily Top CivitAI Images Archive},\n  year = {2026},\n  publisher = {Hugging Face},\n  howpublished = {\\url{https://huggingface.co/datasets/Hyphonical/civistash}}\n}",
+    "homepage": "https://github.com/Hyphonical/civistash",
+    "license": "other",
+    "features": {
+      "id": {
+        "dtype": "int64",
+        "_type": "Value"
+      },
+      "url": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "hash": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "width": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "height": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "type": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "nsfw": {
+        "dtype": "bool",
+        "_type": "Value"
+      },
+      "createdAt": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "username": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "modelId": {
+        "dtype": "int64",
+        "_type": "Value"
+      },
+      "base_model": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "meta": {
+        "prompt": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "negativePrompt": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "cfgScale": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "sampler": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "seed": {
+          "dtype": "int64",
+          "_type": "Value"
+        },
+        "steps": {
+          "dtype": "int32",
+          "_type": "Value"
+        },
+        "Size": {
+          "dtype": "string",
+          "_type": "Value"
+        }
+      },
+      "stats": {
+        "reactionCount": {
+          "dtype": "int32",
+          "_type": "Value"
+        },
+        "commentCount": {
+          "dtype": "int32",
+          "_type": "Value"
+        },
+        "cryCount": {
+          "dtype": "int32",
+          "_type": "Value"
+        },
+        "likeCount": {
+          "dtype": "int32",
+          "_type": "Value"
+        }
+      },
+      "tags": {
+        "feature": {
+          "id": {
+            "dtype": "int32",
+            "_type": "Value"
+          },
+          "name": {
+            "dtype": "string",
+            "_type": "Value"
+          }
+        },
+        "_type": "Sequence"
+      },
+      "image": {
+        "_type": "Image"
+      },
+      "_civistash": {
+        "downloaded_at": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "source_url": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "stored_as": {
+          "dtype": "string",
+          "_type": "Value"
+        },
+        "archive_date": {
+          "dtype": "string",
+          "_type": "Value"
+        }
+      }
+    }
+  }
+}
